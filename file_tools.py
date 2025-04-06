@@ -69,75 +69,54 @@ def scan_folder_structure(folder_path):
     """
     Scan the folder and return a list of lines representing the folder structure.
     Excludes specified folders, file types, and specific files.
+    Uses a purely recursive approach.
     """
     structure_lines = [f"{os.path.basename(folder_path)}/"]
 
-    def build_structure(current_path, indent=""):
+    def build_recursive(current_path, indent=""):
+        """Recursively builds the structure lines."""
         nonlocal structure_lines
         try:
+            # List entries, handling potential permission errors
             entries = sorted(os.listdir(current_path))
         except PermissionError:
+            # Add a note if a directory can't be accessed
             structure_lines.append(f"{indent}└── [Permission Denied]")
-            return # Skip directories we can't access
+            return # Stop recursion for this path
 
         filtered_entries = []
+        # Filter entries based on exclusion lists
         for entry in entries:
             full_path = os.path.join(current_path, entry)
             if os.path.isdir(full_path):
+                # Keep directory if not excluded
                 if entry not in EXCLUDED_FOLDERS:
-                    filtered_entries.append({"name": entry, "type": "dir"})
+                    filtered_entries.append({"name": entry, "type": "dir", "path": full_path})
             elif os.path.isfile(full_path):
-                # Check specific filenames and extensions
+                # Keep file if not excluded by name or extension
                 if entry not in EXCLUDED_FILES and \
                    os.path.splitext(entry)[1].lower() not in EXCLUDED_EXTENSIONS:
-                    filtered_entries.append({"name": entry, "type": "file"})
+                    filtered_entries.append({"name": entry, "type": "file", "path": full_path})
 
+        # Process the filtered entries
         for i, item in enumerate(filtered_entries):
             is_last = (i == len(filtered_entries) - 1)
             prefix = "└──" if is_last else "├──"
-            new_indent = indent + ("    " if is_last else "│   ")
+            # The indent for children depends on whether the current item is the last one
+            child_indent = indent + ("    " if is_last else "│   ")
 
             if item["type"] == "dir":
                 structure_lines.append(f"{indent}{prefix} {item['name']}/")
-                build_structure(os.path.join(current_path, item['name']), new_indent)
+                # Recurse into the subdirectory with the calculated child indent
+                build_recursive(item['path'], child_indent)
             else: # type == "file"
                 structure_lines.append(f"{indent}{prefix} {item['name']}")
 
-    # Start building from the root
-    build_structure(folder_path, "") # Start with empty indent for root level
-    # Adjust first level indent for consistency if needed, or keep as is
-    # Let's adjust the initial call slightly for better alignment
-    initial_entries = []
-    try:
-        initial_entries = sorted(os.listdir(folder_path))
-    except PermissionError:
-         return [f"{os.path.basename(folder_path)}/", "└── [Permission Denied]"] # Handle root permission error
-
-    filtered_initial_entries = []
-    for entry in initial_entries:
-        full_path = os.path.join(folder_path, entry)
-        if os.path.isdir(full_path):
-            if entry not in EXCLUDED_FOLDERS:
-                 filtered_initial_entries.append({"name": entry, "type": "dir"})
-        elif os.path.isfile(full_path):
-            if entry not in EXCLUDED_FILES and \
-               os.path.splitext(entry)[1].lower() not in EXCLUDED_EXTENSIONS:
-                filtered_initial_entries.append({"name": entry, "type": "file"})
-
-    for i, item in enumerate(filtered_initial_entries):
-        is_last = (i == len(filtered_initial_entries) - 1)
-        prefix = "└──" if is_last else "├──"
-        indent = "" # Root level items have no indent prefix from the base name line
-        new_indent = "    " if is_last else "│   " # Indent for children of this item
-
-        if item["type"] == "dir":
-            structure_lines.append(f"{indent}{prefix} {item['name']}/")
-            build_structure(os.path.join(folder_path, item['name']), new_indent)
-        else: # type == "file"
-            structure_lines.append(f"{indent}{prefix} {item['name']}")
-
-    # Remove the initial │ if build_structure wasn't called for root items
-    # The logic above handles the root level directly now, making the initial │ unnecessary.
+    # --- Main execution ---
+    # Start the recursion from the root folder_path.
+    # The initial indent passed to the recursive function should be empty "",
+    # because the prefixes (├──, └──) are added relative to the current level's indent.
+    build_recursive(folder_path, "")
 
     return structure_lines
 
