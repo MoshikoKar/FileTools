@@ -51,24 +51,33 @@ python file_tools.py
 
 The tool automatically skips the following items:
 
-### Folders:
-- node_modules
-- __pycache__
-- venv, .venv
-- build, builds
-- uploads
-- .git
-- logs
-- data
-- instance
+### Excluded Folders:
+- .git, .svn, .hg (Version Control)
+- __pycache__, venv, .venv, *.egg-info, .pytest_cache, .mypy_cache, .tox, site-packages (Python)
+- node_modules (Node.js)
+- build, dist, target, bin, obj, out, builds (Build Artifacts)
+- .vscode, .idea, .project, .settings (IDE/Editor Config)
+- .cache, temp, tmp (Cache/Temporary)
+- uploads, logs, data, instance (Common App Folders)
+- coverage (Test Coverage Reports)
+- static, media (Collected static/media files)
 
-### File Extensions:
-- .db
-- .ico, .png, .jpg (image files)
-- .log
-- .pem, .key, .crt, .cer (certificate files)
-- .exe, .toc, .pyz, .spec, .pkg (executable/package files)
-- .pyc, .zip (compiled/compressed files)
+### Excluded File Extensions (Case-Insensitive):
+- .db, .sqlite, .sqlite3, .mdb (Databases)
+- .log (Logs)
+- .pem, .key, .crt, .cer, .p12, .pfx (Security/Keys)
+- .ico, .png, .jpg, .jpeg, .gif, .bmp, .tiff, .svg (Images)
+- .exe, .dll, .so, .o, .a, .lib, .pyc, .pyo, .pyd, .class, .jar, .toc, .pyz, .spec, .pkg (Executables/Compiled/Packages)
+- .zip, .tar, .gz, .bz2, .7z, .rar (Archives)
+- .pdf, .doc, .docx, .xls, .xlsx, .ppt, .pptx (Documents)
+- .mp3, .mp4, .avi, .mov, .wav, .flv, .wmv (Audio/Video)
+- .ttf, .otf, .woff, .woff2 (Fonts)
+- .bak, .swp, .swo (Backup/Swap Files)
+
+### Excluded Specific Files:
+- .DS_Store, Thumbs.db (OS-specific metadata)
+- package-lock.json, yarn.lock, pnpm-lock.yaml, poetry.lock, Pipfile.lock (Package Manager Lock Files)
+- .env (Environment Variables - potentially sensitive)
 
 ## Example Output
 
@@ -87,12 +96,17 @@ ProjectFolder/
 │   └── README.md
 ```
 
-### Empty Files Log Example:
+
+### Empty Files Log Example (empty_files_log.txt):
 ```
-Empty files:
-  src/placeholder.txt
-  tests/fixtures/empty_test.json
-  docs/coming_soon.md
+Empty files found (excluding common build/binary/temporary files):
+============================================================
+  src/utils/placeholder.js
+  docs/upcoming_feature.md
+  config/empty_settings.json
+============================================================
+
+Total empty files found: 3
 ```
 
 ## License

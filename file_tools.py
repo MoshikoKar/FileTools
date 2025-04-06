@@ -3,55 +3,144 @@ import shutil
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+# ---- Centralized Exclusion Lists ----
+# Folders commonly excluded from scans, copies, etc.
+EXCLUDED_FOLDERS = {
+    # Version Control
+    ".git", ".svn", ".hg",
+    # Python specific
+    "__pycache__", "venv", ".venv", "*.egg-info", ".pytest_cache", ".mypy_cache", ".tox", "site-packages",
+    # Node.js specific
+    "node_modules",
+    # Build artifacts / Distributables
+    "build", "dist", "target", "bin", "obj", "out", "builds",
+    # IDE / Editor specific
+    ".vscode", ".idea", ".project", ".settings",
+    # OS specific / Temporary
+    ".DS_Store", # Technically a file, but often acts like a folder artifact
+    ".cache",
+    # Common project structures
+    "uploads", "logs", "data", "instance", "temp", "tmp",
+    # Specific frameworks/tools
+    "coverage", # Coverage reports
+    "static", # Often contains collected static files, duplicates
+    "media",  # Often contains user-uploaded large files
+}
+
+# File extensions commonly excluded (binaries, data, logs, configs, media, archives)
+# Use lowercase for case-insensitive matching
+EXCLUDED_EXTENSIONS = {
+    # Databases
+    ".db", ".sqlite", ".sqlite3", ".mdb",
+    # Logs
+    ".log",
+    # Security / Keys
+    ".pem", ".key", ".crt", ".cer", ".p12", ".pfx",
+    # Images
+    ".ico", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".svg",
+    # Executables / Compiled / Packages
+    ".exe", ".dll", ".so", ".o", ".a", ".lib",
+    ".pyc", ".pyo", ".pyd",
+    ".class", ".jar",
+    ".toc", ".pyz", ".spec", ".pkg",
+    # Archives
+    ".zip", ".tar", ".gz", ".bz2", ".7z", ".rar",
+    # Documents / Media (often large or irrelevant for code scanning)
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    ".mp3", ".mp4", ".avi", ".mov", ".wav", ".flv", ".wmv",
+    # Font files
+    ".ttf", ".otf", ".woff", ".woff2",
+    # Other
+    ".bak", ".swp", ".swo", # Backup/swap files
+}
+
+# Specific filenames to always exclude
+EXCLUDED_FILES = {
+    # OS specific
+    ".DS_Store", "Thumbs.db",
+    # Package manager lock files (often large/binary or change frequently)
+    "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock", "Pipfile.lock",
+    # Environment files (might contain secrets)
+    ".env"
+}
+
 # ---- Folder Structure Scanner Functions ----
 def scan_folder_structure(folder_path):
     """
     Scan the folder and return a list of lines representing the folder structure.
-    Excludes specified folders and file types.
+    Excludes specified folders, file types, and specific files.
     """
-    # Excluded folder names and file extensions
-    excluded_folders = {"node_modules", "__pycache__", "venv", ".venv", "build", "uploads", ".git", "builds", "logs", "data", "instance"}
-    excluded_extensions = {".db", ".ico", ".log", ".pem", ".key", ".png", ".jpg", ".crt", ".cer", ".exe", ".toc", ".pyz", ".spec", ".pkg", ".pyc", ".zip", ".cer"}
-    
     structure_lines = [f"{os.path.basename(folder_path)}/"]
-    
-    def build_structure(root_dir, indent=""):
+
+    def build_structure(current_path, indent=""):
         nonlocal structure_lines
-        # Get directories and files, excluding specified ones
         try:
-            entries = os.listdir(root_dir)
+            entries = sorted(os.listdir(current_path))
         except PermissionError:
-            return  # Skip directories we can't access
-        
-        dirs = []
-        files = []
+            structure_lines.append(f"{indent}└── [Permission Denied]")
+            return # Skip directories we can't access
+
+        filtered_entries = []
         for entry in entries:
-            full_path = os.path.join(root_dir, entry)
+            full_path = os.path.join(current_path, entry)
             if os.path.isdir(full_path):
-                if entry not in excluded_folders:
-                    dirs.append(entry)
-            elif os.path.isfile(full_path) and not any(entry.endswith(ext) for ext in excluded_extensions):
-                files.append(entry)
-        
-        # Sort for consistent output
-        dirs.sort()
-        files.sort()
-        
-        # Process directories and files
-        for i, dir_name in enumerate(dirs):
-            is_last = (i == len(dirs) - 1 and not files)
+                if entry not in EXCLUDED_FOLDERS:
+                    filtered_entries.append({"name": entry, "type": "dir"})
+            elif os.path.isfile(full_path):
+                # Check specific filenames and extensions
+                if entry not in EXCLUDED_FILES and \
+                   os.path.splitext(entry)[1].lower() not in EXCLUDED_EXTENSIONS:
+                    filtered_entries.append({"name": entry, "type": "file"})
+
+        for i, item in enumerate(filtered_entries):
+            is_last = (i == len(filtered_entries) - 1)
             prefix = "└──" if is_last else "├──"
-            structure_lines.append(f"{indent}{prefix} {dir_name}/")
-            build_structure(os.path.join(root_dir, dir_name), indent + ("    " if is_last else "│   "))
-        
-        for i, file_name in enumerate(files):
-            is_last = (i == len(files) - 1)
-            prefix = "└──" if is_last else "├──"
-            structure_lines.append(f"{indent}{prefix} {file_name}")
-    
+            new_indent = indent + ("    " if is_last else "│   ")
+
+            if item["type"] == "dir":
+                structure_lines.append(f"{indent}{prefix} {item['name']}/")
+                build_structure(os.path.join(current_path, item['name']), new_indent)
+            else: # type == "file"
+                structure_lines.append(f"{indent}{prefix} {item['name']}")
+
     # Start building from the root
-    build_structure(folder_path, "│   ")
+    build_structure(folder_path, "") # Start with empty indent for root level
+    # Adjust first level indent for consistency if needed, or keep as is
+    # Let's adjust the initial call slightly for better alignment
+    initial_entries = []
+    try:
+        initial_entries = sorted(os.listdir(folder_path))
+    except PermissionError:
+         return [f"{os.path.basename(folder_path)}/", "└── [Permission Denied]"] # Handle root permission error
+
+    filtered_initial_entries = []
+    for entry in initial_entries:
+        full_path = os.path.join(folder_path, entry)
+        if os.path.isdir(full_path):
+            if entry not in EXCLUDED_FOLDERS:
+                 filtered_initial_entries.append({"name": entry, "type": "dir"})
+        elif os.path.isfile(full_path):
+            if entry not in EXCLUDED_FILES and \
+               os.path.splitext(entry)[1].lower() not in EXCLUDED_EXTENSIONS:
+                filtered_initial_entries.append({"name": entry, "type": "file"})
+
+    for i, item in enumerate(filtered_initial_entries):
+        is_last = (i == len(filtered_initial_entries) - 1)
+        prefix = "└──" if is_last else "├──"
+        indent = "" # Root level items have no indent prefix from the base name line
+        new_indent = "    " if is_last else "│   " # Indent for children of this item
+
+        if item["type"] == "dir":
+            structure_lines.append(f"{indent}{prefix} {item['name']}/")
+            build_structure(os.path.join(folder_path, item['name']), new_indent)
+        else: # type == "file"
+            structure_lines.append(f"{indent}{prefix} {item['name']}")
+
+    # Remove the initial │ if build_structure wasn't called for root items
+    # The logic above handles the root level directly now, making the initial │ unnecessary.
+
     return structure_lines
+
 
 # ---- General Utility Functions ----
 def browse_source_folder():
@@ -77,169 +166,216 @@ def get_unique_dest_path(dest_path):
 
 # ---- Action Functions ----
 def copy_files():
-    """Copy files from source to destination folder"""
+    """Copy files from source to destination folder, respecting exclusions."""
     source = source_var.get()
     dest = dest_var.get()
-    
-    # Validate input
-    if not source:
-        messagebox.showerror("Error", "Please select a source folder.")
+
+    if not source or not os.path.isdir(source):
+        messagebox.showerror("Error", "Please select a valid source folder.")
         return
     if not dest:
         messagebox.showerror("Error", "Please select a destination folder for copying files.")
         return
-    
+    if not os.path.exists(dest):
+        try:
+            os.makedirs(dest)
+        except OSError as e:
+             messagebox.showerror("Error", f"Could not create destination folder: {e}")
+             return
+    if not os.path.isdir(dest):
+        messagebox.showerror("Error", "Destination path exists but is not a folder.")
+        return
+
+
     try:
         status_var.set("Copying files...")
         main_frame.update()
-        
-        for root_dir, dirs, files in os.walk(source):
-            # Exclude directories and their contents
-            dirs[:] = [d for d in dirs if d not in ["node_modules", "__pycache__", "venv", ".venv", "build", "uploads", ".git", "builds", "logs", "data", "instance"]]
+        copied_count = 0
+
+        for root_dir, dirs, files in os.walk(source, topdown=True):
+            # Prune traversal by removing excluded directories
+            dirs[:] = [d for d in dirs if d not in EXCLUDED_FOLDERS]
+
             for file in files:
-                if (os.path.basename(file) != "package-lock.json" and 
-                    os.path.splitext(file)[1] not in [".db", ".ico"]):
-                    full_path = os.path.join(root_dir, file)
-                    if os.path.getsize(full_path) > 0:
-                        if path_name_var.get():
-                            relative_path = os.path.relpath(full_path, source)
-                            new_name = relative_path.replace(os.sep, "_")
-                        else:
-                            new_name = os.path.basename(file)
-                        dest_path = os.path.join(dest, new_name)
-                        unique_dest_path = get_unique_dest_path(dest_path)
-                        shutil.copy(full_path, unique_dest_path)
-        
-        status_var.set("Files copied successfully!")
+                # Check excluded files and extensions
+                if file in EXCLUDED_FILES or os.path.splitext(file)[1].lower() in EXCLUDED_EXTENSIONS:
+                    continue
+
+                full_path = os.path.join(root_dir, file)
+
+                # Skip empty files if desired (optional, currently copying non-empty)
+                try:
+                     if os.path.getsize(full_path) == 0:
+                         continue # Skip empty files
+                except OSError:
+                    continue # Skip files we can't access size for
+
+                # Determine destination name and path
+                if path_name_var.get():
+                    relative_path = os.path.relpath(full_path, source)
+                    # Sanitize relative path for use as filename
+                    new_name = relative_path.replace(os.sep, "_").replace(":", "_").replace("*", "_").replace("?", "_").replace("\"", "_").replace("<", "_").replace(">", "_").replace("|", "_")
+                else:
+                    new_name = file
+
+                dest_path = os.path.join(dest, new_name)
+                unique_dest_path = get_unique_dest_path(dest_path)
+
+                # Perform the copy
+                try:
+                    shutil.copy2(full_path, unique_dest_path) # copy2 preserves metadata
+                    copied_count += 1
+                except Exception as copy_e:
+                    print(f"Warning: Could not copy file {full_path}: {copy_e}") # Log to console maybe?
+
+
+        status_var.set(f"Files copied successfully! ({copied_count} files)")
     except Exception as e:
-        messagebox.showerror("Error", str(e))
+        messagebox.showerror("Error", f"An error occurred during copy: {str(e)}")
         status_var.set(f"Error occurred: {str(e)}")
 
 def run_check():
-    """Check for empty files in the specified folder"""
+    """Check for empty files in the specified folder, respecting exclusions."""
     source = source_var.get()
-    
-    # Validate input
-    if not source:
-        messagebox.showerror("Error", "Please select a source folder to check for empty files.")
+
+    if not source or not os.path.isdir(source):
+        messagebox.showerror("Error", "Please select a valid source folder to check.")
         return
-    
+
     try:
         status_var.set("Scanning for empty files...")
         main_frame.update()
-        
+
         empty_files = set()
-        excluded_folders = {"node_modules", "__pycache__", "venv", ".venv", "build", "uploads", ".git", "builds", "logs", "data", "instance"}
-        excluded_extensions = {".db", ".ico", ".log", ".pem", ".key", ".png", ".jpg", ".crt", ".cer", ".exe", ".toc", ".pyz", ".spec", ".pkg", ".pyc", ".zip", ".cer"}
-        
-        for root, dirs, files in os.walk(source, topdown=True):
-            dirs[:] = [d for d in dirs if d not in excluded_folders]
+
+        for root_dir, dirs, files in os.walk(source, topdown=True):
+            # Prune traversal
+            dirs[:] = [d for d in dirs if d not in EXCLUDED_FOLDERS]
+
             for file in files:
-                if any(file.endswith(ext) for ext in excluded_extensions):
+                # Check exclusions
+                if file in EXCLUDED_FILES or os.path.splitext(file)[1].lower() in EXCLUDED_EXTENSIONS:
                     continue
-                rel_path = os.path.relpath(os.path.join(root, file), source)
-                rel_path = rel_path.replace('\\', '/')
-                full_path = os.path.join(root, file)
-                if os.path.getsize(full_path) == 0:
-                    empty_files.add(rel_path)
-        
+
+                full_path = os.path.join(root_dir, file)
+                try:
+                    if os.path.getsize(full_path) == 0:
+                        rel_path = os.path.relpath(full_path, source)
+                        empty_files.add(rel_path.replace('\\', '/')) # Normalize path separators
+                except OSError:
+                    continue # Skip files we can't access
+
         # Determine output location
-        output_dir = dest_var.get() if dest_var.get() else os.path.dirname(os.path.abspath(__file__))
+        output_dir = dest_var.get() if dest_var.get() and os.path.isdir(dest_var.get()) else os.path.dirname(os.path.abspath(__file__))
         log_path = os.path.join(output_dir, 'empty_files_log.txt')
-        
-        with open(log_path, 'w') as f:
-            f.write("Empty files:\n")
+
+        with open(log_path, 'w', encoding='utf-8') as f:
+            f.write("Empty files found (excluding common build/binary/temporary files):\n")
             if empty_files:
-                for file in sorted(empty_files):
+                f.write("=" * 60 + "\n")
+                for file in sorted(list(empty_files)):
                     f.write(f"  {file}\n")
+                f.write("=" * 60 + "\n")
+                f.write(f"\nTotal empty files found: {len(empty_files)}\n")
             else:
-                f.write("  No empty files found.\n")
-        
-        status_var.set(f"Log file generated: {log_path}")
+                f.write("\n  No empty files found matching the criteria.\n")
+
+        status_var.set(f"Empty file check complete. Log saved to: {log_path}")
     except Exception as e:
-        messagebox.showerror("Error", f"An error occurred while scanning: {str(e)}")
+        messagebox.showerror("Error", f"An error occurred while scanning for empty files: {str(e)}")
         status_var.set(f"Error occurred: {str(e)}")
 
+
 def run_scan():
-    """Scan the selected folder and generate a structure file."""
+    """Scan the selected folder and generate a structure file, respecting exclusions."""
     source = source_var.get()
-    
-    # Validate input
-    if not source:
-        messagebox.showerror("Error", "Please select a source folder to scan for structure.")
+
+    if not source or not os.path.isdir(source):
+        messagebox.showerror("Error", "Please select a valid source folder to scan.")
         return
-    
+
     try:
         status_var.set("Generating folder structure...")
         main_frame.update()
-        
-        # Get the folder structure
+
+        # Get the folder structure using the refined function
         structure_lines = scan_folder_structure(source)
-        
+
         # Determine output location
-        output_dir = dest_var.get() if dest_var.get() else os.path.dirname(os.path.abspath(__file__))
+        output_dir = dest_var.get() if dest_var.get() and os.path.isdir(dest_var.get()) else os.path.dirname(os.path.abspath(__file__))
         structure_path = os.path.join(output_dir, 'folder_structure.txt')
-        
+
         # Write to output file
         with open(structure_path, 'w', encoding='utf-8') as f:
             f.write("\n".join(structure_lines))
-        
+
         status_var.set(f"Folder structure generated: {structure_path}")
     except Exception as e:
-        messagebox.showerror("Error", f"An error occurred while scanning: {str(e)}")
+        messagebox.showerror("Error", f"An error occurred while generating structure: {str(e)}")
         status_var.set(f"Error occurred: {str(e)}")
 
 # ---- Main GUI Setup ----
 if __name__ == "__main__":
     root = tk.Tk()
-    root.title("File Tools")
-    
+    root.title("File Tools v1.1") # Added version
+
     # Create main frame
-    main_frame = ttk.Frame(root, padding=10)
-    main_frame.pack(fill=tk.BOTH, expand=True)
-    
+    main_frame = ttk.Frame(root, padding="10 10 10 10") # Adjusted padding
+    main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S)) # Use grid and sticky
+
     # Variables
     source_var = tk.StringVar()
     dest_var = tk.StringVar()
-    status_var = tk.StringVar()
+    status_var = tk.StringVar(value="Status: Idle") # Initial status
     path_name_var = tk.BooleanVar(value=True)  # Default to using path name
-    
+
+    # Configure grid weights for resizing
+    root.columnconfigure(0, weight=1)
+    root.rowconfigure(0, weight=1)
+    main_frame.columnconfigure(1, weight=1) # Allow entry widget to expand
+
     # Source folder selection
     ttk.Label(main_frame, text="Source Folder:").grid(row=0, column=0, sticky=tk.E, padx=5, pady=5)
-    ttk.Entry(main_frame, textvariable=source_var, width=50).grid(row=0, column=1, padx=5, pady=5)
-    ttk.Button(main_frame, text="Browse", command=browse_source_folder).grid(row=0, column=2, padx=5, pady=5)
-    
+    source_entry = ttk.Entry(main_frame, textvariable=source_var, width=60) # Increased width
+    source_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
+    ttk.Button(main_frame, text="Browse...", command=browse_source_folder).grid(row=0, column=2, padx=5, pady=5)
+
     # Destination folder selection
     ttk.Label(main_frame, text="Destination Folder:").grid(row=1, column=0, sticky=tk.E, padx=5, pady=5)
-    ttk.Entry(main_frame, textvariable=dest_var, width=50).grid(row=1, column=1, padx=5, pady=5)
-    ttk.Button(main_frame, text="Browse", command=browse_dest_folder).grid(row=1, column=2, padx=5, pady=5)
-    
+    dest_entry = ttk.Entry(main_frame, textvariable=dest_var, width=60) # Increased width
+    dest_entry.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
+    ttk.Button(main_frame, text="Browse...", command=browse_dest_folder).grid(row=1, column=2, padx=5, pady=5)
+
     # Note about destination folder
-    ttk.Label(main_frame, text="* Required for Copy Files. Optional for other operations to specify output location.").grid(
-        row=2, column=1, sticky=tk.W, padx=5, pady=(0, 10))
-    
+    ttk.Label(main_frame, text="* Destination required for 'Copy Files'. Optional for others (defaults to script location).", font=('TkDefaultFont', 9)).grid(
+        row=2, column=1, columnspan=2, sticky=tk.W, padx=5, pady=(0, 10))
+
     # Path name checkbox (only for file copy)
     path_name_frame = ttk.Frame(main_frame)
-    path_name_frame.grid(row=3, column=0, columnspan=3, sticky=tk.W, padx=5, pady=(0, 10))
-    
-    ttk.Checkbutton(path_name_frame, text="Use full path in filename", variable=path_name_var).pack(side=tk.LEFT)
-    ttk.Label(path_name_frame, text="(applies to Copy Files only)").pack(side=tk.LEFT, padx=(5, 0))
-    
+    path_name_frame.grid(row=3, column=0, columnspan=3, sticky=tk.W, padx=5, pady=(5, 10))
+
+    ttk.Checkbutton(path_name_frame, text="Use full relative path in copied filename", variable=path_name_var).pack(side=tk.LEFT)
+    ttk.Label(path_name_frame, text="(applies to 'Copy Files' only)", font=('TkDefaultFont', 9)).pack(side=tk.LEFT, padx=(5, 0))
+
     # Create a frame for the action buttons
     button_frame = ttk.Frame(main_frame)
     button_frame.grid(row=4, column=0, columnspan=3, pady=10)
-    
-    # Add action buttons
-    ttk.Button(button_frame, text="Copy Files", command=copy_files, width=20).pack(side=tk.LEFT, padx=5)
-    ttk.Button(button_frame, text="Check Empty Files", command=run_check, width=20).pack(side=tk.LEFT, padx=5)
-    ttk.Button(button_frame, text="Generate Folder Structure", command=run_scan, width=25).pack(side=tk.LEFT, padx=5)
-    
+
+    # Add action buttons - Use consistent width or packing
+    copy_button = ttk.Button(button_frame, text="Copy Files", command=copy_files, width=22)
+    copy_button.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+    check_button = ttk.Button(button_frame, text="Check Empty Files", command=run_check, width=22)
+    check_button.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+    scan_button = ttk.Button(button_frame, text="Generate Folder Structure", command=run_scan, width=25)
+    scan_button.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+
     # Status label
-    ttk.Label(main_frame, textvariable=status_var, wraplength=500).grid(row=5, column=0, columnspan=3, pady=10)
-    
-    # Make window resizable
-    root.columnconfigure(0, weight=1)
-    root.rowconfigure(0, weight=1)
-    
+    status_label = ttk.Label(main_frame, textvariable=status_var, wraplength=550, anchor=tk.W, justify=tk.LEFT) # Improved wrapping and alignment
+    status_label.grid(row=5, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10, padx=5)
+
+    # Add padding to all widgets in main_frame for better spacing
+    for child in main_frame.winfo_children():
+        child.grid_configure(padx=5, pady=5)
+
     # Start the GUI event loop
     root.mainloop()
